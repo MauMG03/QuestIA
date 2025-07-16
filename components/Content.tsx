@@ -37,7 +37,7 @@ export default function Content() {
   const genAI = new GoogleGenerativeAI(apiKey);
 
   async function generateSummary(style: number) {
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash"});
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash"});
     let result;
 
     if (style == 0){
