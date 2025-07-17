@@ -22,7 +22,7 @@ export default function SignUp() {
             photoURL: userInfo.photoURL
         }
         setUser(loggedUser);
-        router.push('/content')
+        router.push('/dashboard')
         console.log(user)
     } catch (error) {
         console.error("Error al iniciar sesión con Google: ", error);
