@@ -8,6 +8,7 @@ import { firestore } from '../../../firebase/firebaseConfig';
 import { ArrowLeft, Edit, Save, X, Plus, User, Download } from 'lucide-react';
 import Link from 'next/link';
 import CrearCandidatoModal from '../../../components/CrearCandidatoModal';
+import Header from '@/components/Header';
 
 // --- Interfaces (sin cambios) ---
 interface Vacante {
@@ -123,6 +124,7 @@ export default function PaginaGestionVacante() {
 
   return (
     <>
+      <Header />
       <CrearCandidatoModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
@@ -132,9 +134,14 @@ export default function PaginaGestionVacante() {
 
       <div className="p-4 md:p-8 bg-gray-50 min-h-screen">
         <header className="mb-8">
-          <Link href="/" className="flex items-center gap-2 text-blue-600 hover:underline mb-4">
-            <ArrowLeft size={20} />
-            Volver al Dashboard
+          <Link href="/dashboard" className="flex items-center gap-2 text-blue-600 hover:underline mb-4">
+            <button
+                type="button"
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition mb-4 shadow"
+              >
+                <ArrowLeft size={20} />
+                Volver al Dashboard
+              </button>
           </Link>
           <h1 className="text-3xl font-bold text-gray-800">Gestión de Vacante</h1>
           <p className="text-md text-gray-500">{vacante?.puesto}</p>
