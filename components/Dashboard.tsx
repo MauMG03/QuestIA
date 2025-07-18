@@ -98,12 +98,6 @@ const fetchVacantes = async () => {
     }
   };
 
-  // Función para editar (por ahora solo un log)
-  const handleEditar = (id: string | number) => {
-    console.log(`Abrir modal/página para editar la vacante ${id}`);
-    // Aquí implementarías la lógica para un modal de edición
-  };
-
   return (
     <>
       <CrearVacanteModal
@@ -137,7 +131,6 @@ const fetchVacantes = async () => {
                   key={vacante.id}
                   vacante={vacante}
                   onDelete={handleEliminar}
-                  onEdit={handleEditar}
                   onUpdateStatus={handleUpdateStatus}
                 />
               ))}
