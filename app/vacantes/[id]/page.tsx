@@ -189,13 +189,14 @@ export default function PaginaGestionVacante() {
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
     const prompt = `Eres un asistente experto en selección de personal. Resume únicamente la información que aparece en el siguiente CV en español, sin inventar ni asumir datos que no estén presentes. El resumen debe tener máximo 40 palabras, resaltando habilidades, experiencia y puntos clave para un reclutador. Si no hay información suficiente, responde: 'No hay información suficiente para generar un resumen.' No uses markdown.\nCV:\n${cvText}`;
     try {
-      const result = await model.generateContent([prompt]);
-      setCvSummaries(prev => ({ ...prev, [candidato.id]: result.response.text() }));
+      const result = await model.generateContent(prompt);
+      const summaryText = await result.response.text();
+      setCvSummaries(prev => ({ ...prev, [candidato.id]: summaryText }));
       setCvSummarySource(prev => ({ ...prev, [candidato.id]: 'generated' }));
       // Guardar el resumen en la DB
       try {
         const candidatoRef = doc(firestore, 'vacantes', id, 'candidatos', candidato.id);
-        await updateDoc(candidatoRef, { cvSummary: result.response.text() });
+        await updateDoc(candidatoRef, { cvSummary: summaryText });
       } catch { }
     } catch (error) {
       setCvSummaries(prev => ({ ...prev, [candidato.id]: "Error al generar resumen." }));
@@ -236,6 +237,39 @@ export default function PaginaGestionVacante() {
     } catch (error) {
       console.error("Error al editar candidato:", error);
     }
+  };
+
+  // Estado para ver Q&A
+  const [qaModalOpen, setQaModalOpen] = useState(false);
+  type QAType = { pregunta?: string; respuesta?: string; question?: string; response?: string };
+  const [qaData, setQaData] = useState<QAType[] | null>(null);
+  const [qaLoading, setQaLoading] = useState(false);
+  const [qaCandidatoNombre, setQaCandidatoNombre] = useState<string>("");
+
+  // Handler para ver Q&A
+  const handleVerEntrevista = async (candidatoId: string) => {
+    setQaLoading(true);
+    setQaModalOpen(true);
+    setQaData(null);
+    const candidato = candidatos.find(c => c.id === candidatoId);
+    setQaCandidatoNombre(candidato ? `${candidato.nombre} ${candidato.apellido}` : "");
+    try {
+      const candidatoRef = doc(firestore, 'vacantes', id, 'candidatos', candidatoId);
+      const candidatoSnap = await getDoc(candidatoRef);
+      if (candidatoSnap.exists()) {
+        const data = candidatoSnap.data();
+        if (data && Array.isArray(data.entrevista)) {
+          setQaData(data.entrevista);
+        } else {
+          setQaData([]);
+        }
+      } else {
+        setQaData([]);
+      }
+    } catch (err) {
+      setQaData([]);
+    }
+    setQaLoading(false);
   };
 
   // Eliminar candidato
@@ -337,6 +371,33 @@ export default function PaginaGestionVacante() {
         onEditar={handleEditarCandidato}
       />
 
+      {/* Modal para ver Q&A */}
+      {qaModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
+          <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-lg">
+            <h2 className="text-xl font-bold mb-4">Preguntas y respuestas de entrevista</h2>
+            <p className="mb-2 text-gray-700 font-semibold">Candidato: {qaCandidatoNombre}</p>
+            {qaLoading ? (
+              <p className="text-blue-600">Cargando Q&amp;A...</p>
+            ) : qaData && qaData.length > 0 ? (
+              <div className="space-y-4 max-h-96 overflow-y-auto">
+                {qaData.map((qa, idx) => (
+                  <div key={idx} className="border rounded p-3 bg-gray-50">
+                    <p className="font-semibold text-indigo-700">Pregunta {idx + 1}: <span className="font-normal text-gray-800">{qa.pregunta || qa.question}</span></p>
+                    <p className="mt-1 text-gray-900"><span className="font-semibold text-green-700">Respuesta:</span> {qa.respuesta || qa.response}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-gray-500">No hay preguntas y respuestas guardadas para este candidato.</p>
+            )}
+            <div className="mt-6 flex justify-end">
+              <button onClick={() => setQaModalOpen(false)} className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">Cerrar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="p-4 md:p-8 bg-gray-50 min-h-screen">
         <header className="mb-8">
           <Link href="/dashboard" className="flex items-center gap-2 text-blue-600 hover:underline mb-4">
@@ -410,14 +471,21 @@ export default function PaginaGestionVacante() {
         <div className="bg-white p-6 rounded-lg shadow-md">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-2xl font-semibold text-gray-700">Candidatos</h2>
-            <button onClick={() => setIsModalOpen(true)} className="flex items-center gap-2 bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-blue-700 transition-colors">
-              <Plus size={18} /> Añadir Candidato
-            </button>
+            <div className="flex gap-2">
+              <button onClick={() => setIsModalOpen(true)} className="flex items-center gap-2 bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-blue-700 transition-colors">
+                <Plus size={18} /> Añadir Candidato
+              </button>
+              {/* Botón para ir a entrevistas con parámetros de vacante y candidato */}
+              {/* Este botón se debe mostrar por cada candidato */}
+            </div>
           </div>
           <div className="space-y-4">
             {candidatos.length > 0 ? (
               candidatos.map(candidato => (
-                <div key={candidato.id} className="flex flex-col gap-2 p-4 border rounded-lg bg-gray-50">
+                <div
+                  key={candidato.id}
+                  className="flex flex-col gap-2 p-4 border rounded-lg bg-gray-50 cursor-pointer hover:bg-purple-50 transition"
+                >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4">
                       <div className="p-2 bg-blue-100 rounded-full"><User className="text-blue-600" /></div>
@@ -427,30 +495,50 @@ export default function PaginaGestionVacante() {
                       </div>
                     </div>
                     <div className="flex gap-2 items-center">
-                      <a href={candidato.cvUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm font-semibold text-blue-600 hover:underline">
-                        <Download size={16} /> Ver CV
+                      <a
+                        href={candidato.cvUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-sm font-semibold text-blue-600 hover:underline px-2 py-1 rounded hover:bg-blue-50"
+                        title="Ver CV"
+                      >
+                        <Download size={16} /> CV
                       </a>
                       <button
-                        onClick={() => { setCandidatoEditando(candidato); setIsEditModalOpen(true); }}
-                        className="px-2 py-1 bg-yellow-400 text-white rounded hover:bg-yellow-500"
-                        title="Editar"
+                        onClick={e => { e.preventDefault(); setCandidatoEditando(candidato); setIsEditModalOpen(true); }}
+                        className="flex items-center gap-1 px-2 py-1 bg-yellow-400 text-white rounded hover:bg-yellow-500"
+                        title="Editar candidato"
                       >
-                        <Edit size={16} />
+                        <Edit size={16} /> Editar
                       </button>
                       <button
-                        onClick={() => handleEliminarCandidato(candidato.id)}
-                        className="px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600"
-                        title="Eliminar"
+                        onClick={e => { e.preventDefault(); handleEliminarCandidato(candidato.id); }}
+                        className="flex items-center gap-1 px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600"
+                        title="Eliminar candidato"
                       >
-                        <X size={16} />
+                        <X size={16} /> Eliminar
                       </button>
                       <button
-                        onClick={() => generateCVSummaryForCandidate(candidato)}
-                        className="px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700"
+                        onClick={e => { e.preventDefault(); generateCVSummaryForCandidate(candidato); }}
+                        className="flex items-center gap-1 px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700"
                         disabled={loadingCVSummary[candidato.id]}
                         title="Generar resumen de CV"
                       >
-                        {loadingCVSummary[candidato.id] ? 'Resumiendo...' : 'Resumen CV'}
+                        <span>{loadingCVSummary[candidato.id] ? 'Resumiendo...' : 'Resumen CV'}</span>
+                      </button>
+                      <button
+                        onClick={() => window.location.href = `/content?vacanteId=${id}&candidatoId=${candidato.id}`}
+                        className="flex items-center gap-1 px-2 py-1 bg-purple-600 text-white rounded hover:bg-purple-700"
+                        title="Ver entrevista"
+                      >
+                        <span>Entrevista</span>
+                      </button>
+                      <button
+                        onClick={e => { e.preventDefault(); handleVerEntrevista(candidato.id); }}
+                        className="flex items-center gap-1 px-2 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+                        title="Ver preguntas y respuestas"
+                      >
+                        <span>Ver Q&A</span>
                       </button>
                     </div>
                   </div>
