@@ -132,6 +132,7 @@ export default function PaginaGestionVacante() {
   // Estado para los resúmenes de CV
   // Estado para los resúmenes individuales de CV
   const [cvSummaries, setCvSummaries] = useState<{ [id: string]: string }>({});
+  const [cvSummarySource, setCvSummarySource] = useState<{ [id: string]: 'db' | 'generated' }>({});
   const [loadingCVSummary, setLoadingCVSummary] = useState<{ [id: string]: boolean }>({});
 
   // Función para generar resumen individual del CV de un candidato
@@ -141,6 +142,21 @@ export default function PaginaGestionVacante() {
       return;
     }
     setLoadingCVSummary(prev => ({ ...prev, [candidato.id]: true }));
+    // Si ya existe el resumen en la DB, usarlo directamente
+    try {
+      const candidatoRef = doc(firestore, 'vacantes', id, 'candidatos', candidato.id);
+      const candidatoSnap = await getDoc(candidatoRef);
+      const candidatoData = candidatoSnap.exists() ? candidatoSnap.data() : null;
+      if (candidatoData && candidatoData.cvSummary) {
+        setCvSummaries(prev => ({ ...prev, [candidato.id]: candidatoData.cvSummary }));
+        setCvSummarySource(prev => ({ ...prev, [candidato.id]: 'db' }));
+        setLoadingCVSummary(prev => ({ ...prev, [candidato.id]: false }));
+        return;
+      }
+    } catch (err) {
+      // Si hay error, continuar con el proceso normal
+    }
+
     let cvText = "No hay información de CV disponible.";
     if (candidato.cvUrl) {
       try {
@@ -148,13 +164,25 @@ export default function PaginaGestionVacante() {
         const data = await res.json();
         if (!data.text || data.text.trim().length < 20) {
           setCvSummaries(prev => ({ ...prev, [candidato.id]: "El CV está vacío o no se pudo leer. No hay información suficiente para generar un resumen." }));
+          setCvSummarySource(prev => ({ ...prev, [candidato.id]: 'generated' }));
           setLoadingCVSummary(prev => ({ ...prev, [candidato.id]: false }));
+          // Guardar en la DB el resultado vacío
+          try {
+            const candidatoRef = doc(firestore, 'vacantes', id, 'candidatos', candidato.id);
+            await updateDoc(candidatoRef, { cvSummary: "El CV está vacío o no se pudo leer. No hay información suficiente para generar un resumen." });
+          } catch { }
           return;
         }
         cvText = data.text;
       } catch (err) {
         setCvSummaries(prev => ({ ...prev, [candidato.id]: "No se pudo extraer el texto del CV. No hay información suficiente para generar un resumen." }));
+        setCvSummarySource(prev => ({ ...prev, [candidato.id]: 'generated' }));
         setLoadingCVSummary(prev => ({ ...prev, [candidato.id]: false }));
+        // Guardar en la DB el resultado vacío
+        try {
+          const candidatoRef = doc(firestore, 'vacantes', id, 'candidatos', candidato.id);
+          await updateDoc(candidatoRef, { cvSummary: "No se pudo extraer el texto del CV. No hay información suficiente para generar un resumen." });
+        } catch { }
         return;
       }
     }
@@ -163,8 +191,20 @@ export default function PaginaGestionVacante() {
     try {
       const result = await model.generateContent([prompt]);
       setCvSummaries(prev => ({ ...prev, [candidato.id]: result.response.text() }));
+      setCvSummarySource(prev => ({ ...prev, [candidato.id]: 'generated' }));
+      // Guardar el resumen en la DB
+      try {
+        const candidatoRef = doc(firestore, 'vacantes', id, 'candidatos', candidato.id);
+        await updateDoc(candidatoRef, { cvSummary: result.response.text() });
+      } catch { }
     } catch (error) {
       setCvSummaries(prev => ({ ...prev, [candidato.id]: "Error al generar resumen." }));
+      setCvSummarySource(prev => ({ ...prev, [candidato.id]: 'generated' }));
+      // Guardar el error en la DB
+      try {
+        const candidatoRef = doc(firestore, 'vacantes', id, 'candidatos', candidato.id);
+        await updateDoc(candidatoRef, { cvSummary: "Error al generar resumen." });
+      } catch { }
     }
     setLoadingCVSummary(prev => ({ ...prev, [candidato.id]: false }));
   }
@@ -416,8 +456,11 @@ export default function PaginaGestionVacante() {
                   </div>
                   {/* Mostrar el resumen individual debajo de cada candidato */}
                   {cvSummaries[candidato.id] && (
-                    <div className="mt-2 p-2 bg-green-50 rounded border border-green-200">
+                    <div className="mt-2 p-2 bg-green-50 rounded border border-green-200 flex items-center justify-between">
                       <span className="text-green-900 text-sm font-medium">Resumen de CV: {cvSummaries[candidato.id]}</span>
+                      <span className={`ml-4 px-2 py-1 text-xs rounded ${cvSummarySource[candidato.id] === 'db' ? 'bg-blue-100 text-blue-700' : 'bg-gray-200 text-gray-700'}`}>
+                        {cvSummarySource[candidato.id] === 'db' ? 'Guardado' : 'Generado'}
+                      </span>
                     </div>
                   )}
                 </div>
