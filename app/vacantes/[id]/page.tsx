@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation';
 import { doc, getDoc, updateDoc, collection, addDoc, getDocs } from 'firebase/firestore';
 import { firestore } from '../../../firebase/firebaseConfig';
 import { ArrowLeft, Edit, Save, X, Plus, User, Download } from 'lucide-react';
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import Link from 'next/link';
 import CrearCandidatoModal from '../../../components/CrearCandidatoModal';
 import { deleteDoc } from 'firebase/firestore';
@@ -124,8 +125,51 @@ function EditarCandidatoModal({ isOpen, onClose, candidato, onEditar }: EditarCa
 }
 
 export default function PaginaGestionVacante() {
+  // Gemini API Key
+  const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+  const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
+
+  // Estado para los resúmenes de CV
+  // Estado para los resúmenes individuales de CV
+  const [cvSummaries, setCvSummaries] = useState<{ [id: string]: string }>({});
+  const [loadingCVSummary, setLoadingCVSummary] = useState<{ [id: string]: boolean }>({});
+
+  // Función para generar resumen individual del CV de un candidato
+  async function generateCVSummaryForCandidate(candidato: Candidato) {
+    if (!genAI) {
+      alert("Gemini API Key no configurada");
+      return;
+    }
+    setLoadingCVSummary(prev => ({ ...prev, [candidato.id]: true }));
+    let cvText = "No hay información de CV disponible.";
+    if (candidato.cvUrl) {
+      try {
+        const res = await fetch(`/api/extract-pdf-text?url=${encodeURIComponent(candidato.cvUrl)}`);
+        const data = await res.json();
+        if (!data.text || data.text.trim().length < 20) {
+          setCvSummaries(prev => ({ ...prev, [candidato.id]: "El CV está vacío o no se pudo leer. No hay información suficiente para generar un resumen." }));
+          setLoadingCVSummary(prev => ({ ...prev, [candidato.id]: false }));
+          return;
+        }
+        cvText = data.text;
+      } catch (err) {
+        setCvSummaries(prev => ({ ...prev, [candidato.id]: "No se pudo extraer el texto del CV. No hay información suficiente para generar un resumen." }));
+        setLoadingCVSummary(prev => ({ ...prev, [candidato.id]: false }));
+        return;
+      }
+    }
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const prompt = `Eres un asistente experto en selección de personal. Resume únicamente la información que aparece en el siguiente CV en español, sin inventar ni asumir datos que no estén presentes. El resumen debe tener máximo 40 palabras, resaltando habilidades, experiencia y puntos clave para un reclutador. Si no hay información suficiente, responde: 'No hay información suficiente para generar un resumen.' No uses markdown.\nCV:\n${cvText}`;
+    try {
+      const result = await model.generateContent([prompt]);
+      setCvSummaries(prev => ({ ...prev, [candidato.id]: result.response.text() }));
+    } catch (error) {
+      setCvSummaries(prev => ({ ...prev, [candidato.id]: "Error al generar resumen." }));
+    }
+    setLoadingCVSummary(prev => ({ ...prev, [candidato.id]: false }));
+  }
   const params = useParams();
-  const id = params.id as string;
+  const id = params?.id as string;
 
   // --- Estados y Lógica (sin cambios) ---
   const [vacante, setVacante] = useState<Vacante | null>(null);
@@ -333,33 +377,49 @@ export default function PaginaGestionVacante() {
           <div className="space-y-4">
             {candidatos.length > 0 ? (
               candidatos.map(candidato => (
-                <div key={candidato.id} className="flex items-center justify-between p-4 border rounded-lg bg-gray-50">
-                  <div className="flex items-center gap-4">
-                    <div className="p-2 bg-blue-100 rounded-full"><User className="text-blue-600" /></div>
-                    <div>
-                      <p className="font-bold">{candidato.nombre} {candidato.apellido}</p>
-                      <p className="text-sm text-gray-600">{candidato.correo}</p>
+                <div key={candidato.id} className="flex flex-col gap-2 p-4 border rounded-lg bg-gray-50">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="p-2 bg-blue-100 rounded-full"><User className="text-blue-600" /></div>
+                      <div>
+                        <p className="font-bold">{candidato.nombre} {candidato.apellido}</p>
+                        <p className="text-sm text-gray-600">{candidato.correo}</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 items-center">
+                      <a href={candidato.cvUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm font-semibold text-blue-600 hover:underline">
+                        <Download size={16} /> Ver CV
+                      </a>
+                      <button
+                        onClick={() => { setCandidatoEditando(candidato); setIsEditModalOpen(true); }}
+                        className="px-2 py-1 bg-yellow-400 text-white rounded hover:bg-yellow-500"
+                        title="Editar"
+                      >
+                        <Edit size={16} />
+                      </button>
+                      <button
+                        onClick={() => handleEliminarCandidato(candidato.id)}
+                        className="px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600"
+                        title="Eliminar"
+                      >
+                        <X size={16} />
+                      </button>
+                      <button
+                        onClick={() => generateCVSummaryForCandidate(candidato)}
+                        className="px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700"
+                        disabled={loadingCVSummary[candidato.id]}
+                        title="Generar resumen de CV"
+                      >
+                        {loadingCVSummary[candidato.id] ? 'Resumiendo...' : 'Resumen CV'}
+                      </button>
                     </div>
                   </div>
-                  <div className="flex gap-2 items-center">
-                    <a href={candidato.cvUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm font-semibold text-blue-600 hover:underline">
-                      <Download size={16} /> Ver CV
-                    </a>
-                    <button
-                      onClick={() => { setCandidatoEditando(candidato); setIsEditModalOpen(true); }}
-                      className="px-2 py-1 bg-yellow-400 text-white rounded hover:bg-yellow-500"
-                      title="Editar"
-                    >
-                      <Edit size={16} />
-                    </button>
-                    <button
-                      onClick={() => handleEliminarCandidato(candidato.id)}
-                      className="px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600"
-                      title="Eliminar"
-                    >
-                      <X size={16} />
-                    </button>
-                  </div>
+                  {/* Mostrar el resumen individual debajo de cada candidato */}
+                  {cvSummaries[candidato.id] && (
+                    <div className="mt-2 p-2 bg-green-50 rounded border border-green-200">
+                      <span className="text-green-900 text-sm font-medium">Resumen de CV: {cvSummaries[candidato.id]}</span>
+                    </div>
+                  )}
                 </div>
               ))
             ) : (
