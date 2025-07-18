@@ -42,7 +42,7 @@ export default function VacanteCard({ vacante, onDelete, onUpdateStatus }: Vacan
         <div className="mt-6 flex items-center justify-between text-gray-600">
             <div className="flex items-center gap-2">
                 <Users size={18} />
-                <span className="text-sm">{candidatos || 0} Candidatos</span>
+                {/* <span className="text-sm">{candidatos || 0} Candidatos</span> */}
             </div>
         </div>
       </div>
