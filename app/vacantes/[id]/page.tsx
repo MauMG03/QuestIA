@@ -8,6 +8,8 @@ import { firestore } from '../../../firebase/firebaseConfig';
 import { ArrowLeft, Edit, Save, X, Plus, User, Download } from 'lucide-react';
 import Link from 'next/link';
 import CrearCandidatoModal from '../../../components/CrearCandidatoModal';
+import { deleteDoc } from 'firebase/firestore';
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import Header from '@/components/Header';
 
 // --- Interfaces (sin cambios) ---
@@ -36,6 +38,91 @@ interface NuevoCandidatoData {
   cvUrl: string;
 }
 
+interface EditarCandidatoModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  candidato: Candidato | null;
+  onEditar: (data: NuevoCandidatoData) => void;
+}
+
+function EditarCandidatoModal({ isOpen, onClose, candidato, onEditar }: EditarCandidatoModalProps) {
+  const [formData, setFormData] = React.useState<NuevoCandidatoData>({
+    nombre: candidato?.nombre || '',
+    apellido: candidato?.apellido || '',
+    correo: candidato?.correo || '',
+    telefono: candidato?.telefono || '',
+    cvUrl: candidato?.cvUrl || '',
+  });
+  const [file, setFile] = React.useState<File | null>(null);
+  const [subiendo, setSubiendo] = React.useState(false);
+
+  React.useEffect(() => {
+    if (candidato) {
+      setFormData({
+        nombre: candidato.nombre,
+        apellido: candidato.apellido,
+        correo: candidato.correo,
+        telefono: candidato.telefono,
+        cvUrl: candidato.cvUrl,
+      });
+      setFile(null);
+    }
+  }, [candidato]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value, files } = e.target;
+    if (name === 'cvFile' && files && files[0]) {
+      setFile(files[0]);
+    } else {
+      setFormData(prev => ({ ...prev, [name]: value }));
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    let newCvUrl = formData.cvUrl;
+    if (file) {
+      setSubiendo(true);
+      try {
+        const storage = getStorage();
+        const fileRef = storageRef(storage, `cvs/${Date.now()}_${file.name}`);
+        await uploadBytes(fileRef, file);
+        newCvUrl = await getDownloadURL(fileRef);
+      } catch (err) {
+        alert('Error al subir el archivo');
+        setSubiendo(false);
+        return;
+      }
+      setSubiendo(false);
+    }
+    onEditar({ ...formData, cvUrl: newCvUrl });
+  };
+
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
+      <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-md">
+        <h2 className="text-xl font-bold mb-4">Editar Candidato</h2>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <input name="nombre" value={formData.nombre} onChange={handleChange} placeholder="Nombre" className="w-full border p-2 rounded" />
+          <input name="apellido" value={formData.apellido} onChange={handleChange} placeholder="Apellido" className="w-full border p-2 rounded" />
+          <input name="correo" value={formData.correo} onChange={handleChange} placeholder="Correo" className="w-full border p-2 rounded" />
+          <input name="telefono" value={formData.telefono} onChange={handleChange} placeholder="Teléfono" className="w-full border p-2 rounded" />
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Cambiar documento (CV)</label>
+            <input type="file" name="cvFile" accept="application/pdf" onChange={handleChange} className="w-full" />
+          </div>
+          {subiendo && <p className="text-blue-600">Subiendo archivo...</p>}
+          <div className="flex gap-2 justify-end">
+            <button type="button" onClick={onClose} className="px-4 py-2 bg-gray-400 text-white rounded">Cancelar</button>
+            <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded" disabled={subiendo}>Guardar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export default function PaginaGestionVacante() {
   const params = useParams();
   const id = params.id as string;
@@ -51,6 +138,33 @@ export default function PaginaGestionVacante() {
   });
   const [candidatos, setCandidatos] = useState<Candidato[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [candidatoEditando, setCandidatoEditando] = useState<Candidato | null>(null);
+  // Editar candidato
+  const handleEditarCandidato = async (data: NuevoCandidatoData) => {
+    if (!id || !candidatoEditando) return;
+    try {
+      const candidatoRef = doc(firestore, 'vacantes', id, 'candidatos', candidatoEditando.id);
+      await updateDoc(candidatoRef, data as { [key: string]: any });
+      setCandidatos(prev => prev.map(c => c.id === candidatoEditando.id ? { id: c.id, ...data } : c));
+      setIsEditModalOpen(false);
+      setCandidatoEditando(null);
+    } catch (error) {
+      console.error("Error al editar candidato:", error);
+    }
+  };
+
+  // Eliminar candidato
+  const handleEliminarCandidato = async (candidatoId: string) => {
+    if (!id) return;
+    try {
+      const candidatoRef = doc(firestore, 'vacantes', id, 'candidatos', candidatoId);
+      await deleteDoc(candidatoRef);
+      setCandidatos(prev => prev.filter(c => c.id !== candidatoId));
+    } catch (error) {
+      console.error("Error al eliminar candidato:", error);
+    }
+  };
 
   useEffect(() => {
     const fetchAllData = async () => {
@@ -89,7 +203,7 @@ export default function PaginaGestionVacante() {
       throw error;
     }
   };
-  
+
   const handleSaveChanges = async () => {
     if (!id) return;
     const vacanteDocRef = doc(firestore, 'vacantes', id);
@@ -112,7 +226,7 @@ export default function PaginaGestionVacante() {
     }
     setIsEditing(false);
   };
-  
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
@@ -125,23 +239,30 @@ export default function PaginaGestionVacante() {
   return (
     <>
       <Header />
+
       <CrearCandidatoModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onCrear={handleCrearCandidato}
         vacanteId={id}
       />
+      <EditarCandidatoModal
+        isOpen={isEditModalOpen}
+        onClose={() => { setIsEditModalOpen(false); setCandidatoEditando(null); }}
+        candidato={candidatoEditando}
+        onEditar={handleEditarCandidato}
+      />
 
       <div className="p-4 md:p-8 bg-gray-50 min-h-screen">
         <header className="mb-8">
           <Link href="/dashboard" className="flex items-center gap-2 text-blue-600 hover:underline mb-4">
             <button
-                type="button"
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition mb-4 shadow"
-              >
-                <ArrowLeft size={20} />
-                Volver al Dashboard
-              </button>
+              type="button"
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition mb-4 shadow"
+            >
+              <ArrowLeft size={20} />
+              Volver al Dashboard
+            </button>
           </Link>
           <h1 className="text-3xl font-bold text-gray-800">Gestión de Vacante</h1>
           <p className="text-md text-gray-500">{vacante?.puesto}</p>
@@ -168,7 +289,7 @@ export default function PaginaGestionVacante() {
               </button>
             )}
           </div>
-          
+
           {isEditing ? (
             <div className="space-y-4">
               {/* Formulario de edición */}
@@ -220,9 +341,25 @@ export default function PaginaGestionVacante() {
                       <p className="text-sm text-gray-600">{candidato.correo}</p>
                     </div>
                   </div>
-                  <a href={candidato.cvUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm font-semibold text-blue-600 hover:underline">
-                    <Download size={16} /> Ver CV
-                  </a>
+                  <div className="flex gap-2 items-center">
+                    <a href={candidato.cvUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm font-semibold text-blue-600 hover:underline">
+                      <Download size={16} /> Ver CV
+                    </a>
+                    <button
+                      onClick={() => { setCandidatoEditando(candidato); setIsEditModalOpen(true); }}
+                      className="px-2 py-1 bg-yellow-400 text-white rounded hover:bg-yellow-500"
+                      title="Editar"
+                    >
+                      <Edit size={16} />
+                    </button>
+                    <button
+                      onClick={() => handleEliminarCandidato(candidato.id)}
+                      className="px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600"
+                      title="Eliminar"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
                 </div>
               ))
             ) : (
